@@ -98,6 +98,7 @@ jobs:
             --host=${MINGW_CHOST} \
             --build=${MINGW_CHOST} \
             --enable-shared \
+            --enable-static \
             --without-ensurepip \
             --with-system-expat \
             --with-system-libmpdec \
@@ -121,21 +122,21 @@ jobs:
 
           pkgdir=python_pkgdir
 
-          make -j1 install DESTDIR="${pkgdir}"
+          make -j8 install DESTDIR="${pkgdir}"
 
           # Fix shebangs
           _pybasever=$(./python.exe -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}');")
           for fscripts in 2to3 2to3-${_pybasever} idle3 idle${_pybasever} pydoc3 pydoc${_pybasever}; do
-              sed -i "s|$(cygpath -w ${MINGW_PREFIX} | sed 's|\\|\\\\|g')/bin/python${_pybasever}.exe|/usr/bin/env python${_pybasever}.exe|g" "${pkgdir}${MINGW_PREFIX}"/bin/${fscripts}
+              sed -i "s|$(cygpath -w ${MINGW_PREFIX} | sed 's|\\|\\\\|g')/python${_pybasever}.exe|/usr/bin/env python${_pybasever}.exe|g" "${pkgdir}${MINGW_PREFIX}"/${fscripts}
           done
-          sed -i "s|#!${MINGW_PREFIX}/bin/python${_pybasever}.exe|#!/usr/bin/env python${_pybasever}.exe|" "${pkgdir}${MINGW_PREFIX}"/lib/python${_pybasever}/config-${_pybasever}/python-config.py
+          sed -i "s|#!${MINGW_PREFIX}/python${_pybasever}.exe|#!/usr/bin/env python${_pybasever}.exe|" "${pkgdir}${MINGW_PREFIX}"/lib/python${_pybasever}/config-${_pybasever}/python-config.py
 
           # Create version-less aliases
-          cp "${pkgdir}${MINGW_PREFIX}"/bin/python3.exe "${pkgdir}${MINGW_PREFIX}"/bin/python.exe
-          cp "${pkgdir}${MINGW_PREFIX}"/bin/python3w.exe "${pkgdir}${MINGW_PREFIX}"/bin/pythonw.exe
-          cp "${pkgdir}${MINGW_PREFIX}"/bin/python3-config "${pkgdir}${MINGW_PREFIX}"/bin/python-config
-          cp "${pkgdir}${MINGW_PREFIX}"/bin/idle3 "${pkgdir}${MINGW_PREFIX}"/bin/idle
-          cp "${pkgdir}${MINGW_PREFIX}"/bin/pydoc3 "${pkgdir}${MINGW_PREFIX}"/bin/pydoc
+          cp "${pkgdir}${MINGW_PREFIX}"/python3.exe "${pkgdir}${MINGW_PREFIX}"/python.exe
+          cp "${pkgdir}${MINGW_PREFIX}"/python3w.exe "${pkgdir}${MINGW_PREFIX}"/pythonw.exe
+          cp "${pkgdir}${MINGW_PREFIX}"/python3-config "${pkgdir}${MINGW_PREFIX}"/python-config
+          cp "${pkgdir}${MINGW_PREFIX}"/idle3 "${pkgdir}${MINGW_PREFIX}"/idle
+          cp "${pkgdir}${MINGW_PREFIX}"/pydoc3 "${pkgdir}${MINGW_PREFIX}"/pydoc
 
           # copy to /
           cp -rf "${pkgdir}"/* /
@@ -146,54 +147,11 @@ jobs:
         run: |
           cd cpython-mingw
           cd _build
-          tar -zcf python.tar.gz python_pkgdir/
+          tar -zcf python.tar.xz python_pkgdir/
 
       - name: 上传
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: build-${{ matrix.msystem }}
-          path: cpython-mingw/_build/python.tar.gz
-
-      - name: 获取仓库信息
-        id: repo-info
-        run: |
-          DEFAULT_BRANCH=$(curl -s https://api.github.com/repos/msys2-contrib/cpython-mingw | jq -r .default_branch)
-          echo "default_branch=$DEFAULT_BRANCH" >> $GITHUB_OUTPUT
-          echo "commit_sha=$(git ls-remote https://github.com/msys2-contrib/cpython-mingw.git $DEFAULT_BRANCH | cut -f1)" >> $GITHUB_OUTPUT
-          echo "build_date=$(date -u +'%Y%m%dT%H%M%SZ')" >> $GITHUB_OUTPUT
-
-      - name: 创建 Release
-        id: create-release  # 添加步骤ID
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: build-${{ steps.repo-info.outputs.build_date }}
-          name: "cpython-mingw ${{ steps.repo-info.outputs.default_branch }}@${{ steps.repo-info.outputs.commit_sha }} Time:${{ steps.repo-info.outputs.build_date }}"
-          body: "Automated build triggered on ${{ steps.repo-info.outputs.build_date }}"
-          prerelease: true
-          draft: false
-          fail_orphans: true
-
-      - name: 上传到 Release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-
-          upload_url: ${{ steps.create-release.outputs.upload_url }}  # 使用步骤输出值
-          asset_path: cpython-mingw/_build/python.tar.gz
-          asset_name: "python-${{ matrix.msystem }}.tar.gz"
-          asset_content_type: application/gzip
-
-      - name: 清理旧 Release
-        if: always()
-        run: |
-          # 保留最新的50个Release
-          gh api repos/${{ github.repository }}/releases --paginate | \
-          jq -r '.[] | .id' | \
-          tail -n +51 | \
-          xargs -I {} gh api repos/${{ github.repository }}/releases/{} -X DELETE
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: cpython-mingw/_build/python.tar.xz
