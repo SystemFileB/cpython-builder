@@ -104,13 +104,15 @@ jobs:
             --without-ensurepip \
             --with-system-expat \
             --with-system-libmpdec \
-            --with-lto=yes \
+            --enable-optimizations \
             --disable-test-modules \
             --with-nt-threads \
             --with-static-libpython \
             --enable-loadable-sqlite-extensions \
-            CFLAGS="-O2 -pipe -D__USE_MINGW_ANSI_STDIO=1 -D_WIN32_WINNT=0x0600 -DWINVER=0x0600 -fno-unroll-loops" \
-            LDFLAGS="-Wl,--strip-all"
+            --with-lto=yes \                  # 保留LTO优化
+            --enable-optimizations \            # 启用PGO
+            CFLAGS="-O2 -pipe -D__USE_MINGW_ANSI_STDIO=1 -flto -fno-unroll-loops -fno-ident" \
+            LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
 
           make -j8
 
