@@ -20,9 +20,6 @@ jobs:
           - msystem: MINGW32
             prefix: mingw-w64-i686
             runner: windows-2022
-          - msystem: UCRT64
-            prefix: mingw-w64-ucrt-x86_64
-            runner: windows-2022
           - msystem: CLANG64
             prefix: mingw-w64-clang-x86_64
             runner: windows-2022
