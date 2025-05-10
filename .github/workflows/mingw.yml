@@ -109,8 +109,7 @@ jobs:
             --with-nt-threads \
             --with-static-libpython \
             --enable-loadable-sqlite-extensions \
-            --with-lto=yes \                  # 保留LTO优化
-            --enable-optimizations \            # 启用PGO
+            --with-lto=yes \
             CFLAGS="-O2 -pipe -D__USE_MINGW_ANSI_STDIO=1 -flto -fno-unroll-loops -fno-ident" \
             LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
 
