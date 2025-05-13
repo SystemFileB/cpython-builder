@@ -1,0 +1,143 @@
+name: 构建 - Os优化 - 静态链接
+on: 
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 */7 * *'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        msystem: ['MINGW64','MINGW32','CLANG64','CLANGARM64']
+        include:
+          - msystem: MINGW64
+            prefix: mingw-w64-x86_64
+            runner: windows-2022
+          - msystem: MINGW32
+            prefix: mingw-w64-i686
+            runner: windows-2022
+          - msystem: CLANG64
+            prefix: mingw-w64-clang-x86_64
+            runner: windows-2022
+          - msystem: CLANGARM64
+            prefix: mingw-w64-clang-aarch64
+            runner: windows-11-arm
+    steps:
+      - name: 设置git
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: 克隆python存储库
+        run: |
+          git clone https://github.com/msys2-contrib/cpython-mingw.git --depth 1
+
+      - name: 安装MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          release: ${{ matrix.msystem == 'CLANGARM64' }}
+          update: true
+          install: >-
+            make
+            binutils
+            autoconf
+            autoconf-archive
+            automake-wrapper
+            tar
+            gzip
+            ${{ matrix.prefix }}-toolchain
+            ${{ matrix.prefix }}-expat
+            ${{ matrix.prefix }}-bzip2
+            ${{ matrix.prefix }}-libffi
+            ${{ matrix.prefix }}-mpdecimal
+            ${{ matrix.prefix }}-ncurses
+            ${{ matrix.prefix }}-openssl
+            ${{ matrix.prefix }}-sqlite3
+            ${{ matrix.prefix }}-tcl
+            ${{ matrix.prefix }}-tk
+            ${{ matrix.prefix }}-zlib
+            ${{ matrix.prefix }}-xz
+            ${{ matrix.prefix }}-tzdata
+
+      - name: 编译
+        shell: msys2 {0}
+        run: |
+          cd cpython-mingw
+          set -ex
+
+          if [[ "${{ matrix.msystem }}" == CLANG* ]]; then
+            export CC=clang
+            export CXX=clang++
+          fi
+          autoreconf -vfi
+
+          rm -Rf _build && mkdir _build && cd _build
+
+          ../configure \
+            --prefix=${MINGW_PREFIX} \
+            --bindir=${MINGW_PREFIX} \
+            --sbindir=${MINGW_PREFIX} \
+            --docdir=${MINGW_PREFIX}/doc \
+            --host=${MINGW_CHOST} \
+            --build=${MINGW_CHOST} \
+            --without-ensurepip \
+            --with-system-expat \
+            --with-system-libmpdec \
+            --enable-optimizations \
+            --disable-test-modules \
+            --with-nt-threads \
+            --with-static-libpython \
+            --enable-loadable-sqlite-extensions \
+            --with-lto=yes \
+            CFLAGS="-Os -pipe -D__USE_MINGW_ANSI_STDIO=1 -flto -fno-unroll-loops -fno-ident" \
+            LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
+
+          make -j8
+
+      - name: 安装
+        shell: msys2 {0}
+        run: |
+          cd cpython-mingw
+          set -ex
+          cd _build
+
+          pkgdir=python_pkgdir
+
+          make -j8 install DESTDIR="${pkgdir}"
+
+          # Fix shebangs
+          _pybasever=$(./python.exe -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}');")
+          for fscripts in 2to3 2to3-${_pybasever} idle3 idle${_pybasever} pydoc3 pydoc${_pybasever}; do
+              sed -i "s|$(cygpath -w ${MINGW_PREFIX} | sed 's|\\|\\\\|g')/python${_pybasever}.exe|/usr/bin/env python${_pybasever}.exe|g" "${pkgdir}${MINGW_PREFIX}"/${fscripts}
+          done
+          sed -i "s|#!${MINGW_PREFIX}/python${_pybasever}.exe|#!/usr/bin/env python${_pybasever}.exe|" "${pkgdir}${MINGW_PREFIX}"/lib/python${_pybasever}/config-${_pybasever}/python-config.py
+
+          # Create version-less aliases
+          cp "${pkgdir}${MINGW_PREFIX}"/python3.exe "${pkgdir}${MINGW_PREFIX}"/python.exe
+          cp "${pkgdir}${MINGW_PREFIX}"/python3w.exe "${pkgdir}${MINGW_PREFIX}"/pythonw.exe
+          cp "${pkgdir}${MINGW_PREFIX}"/python3-config "${pkgdir}${MINGW_PREFIX}"/python-config
+          cp "${pkgdir}${MINGW_PREFIX}"/idle3 "${pkgdir}${MINGW_PREFIX}"/idle
+          cp "${pkgdir}${MINGW_PREFIX}"/pydoc3 "${pkgdir}${MINGW_PREFIX}"/pydoc
+
+          # copy to /
+          cp -rf "${pkgdir}"/* /
+
+      - name: 压缩构建产物
+        if: always()
+        shell: msys2 {0}
+        run: |
+          cd cpython-mingw
+          cd _build
+          tar -zcf python.tar.xz python_pkgdir/
+
+      - name: 上传
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-${{ matrix.msystem }}
+          path: cpython-mingw/_build/python.tar.xz

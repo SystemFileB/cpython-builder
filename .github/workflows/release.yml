@@ -1,0 +1,67 @@
+name: 发布到 Releases
+
+on:
+  workflow_run:
+    workflows: 
+      - "构建 - Os优化 - 动态链接"
+      - "构建 - Os优化 - 静态链接"
+      - "构建 - O2优化 - 动态链接" 
+      - "构建 - O2优化 - 静态链接"
+      - "构建 - O3优化 - 动态链接"
+      - "构建 - O3优化 - 静态链接"
+    types: [completed]
+
+jobs:
+  release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: windows-latest
+    steps:
+      - name: 下载所有构建产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: build-*
+          path: artifacts
+
+      - name: 重命名并打包
+        shell: powershell
+        run: |
+          $date = Get-Date -Format "yyMMdd"
+          Get-ChildItem artifacts -Recurse -Filter *.tar.xz | ForEach-Object {
+              $parent = $_.Directory.Name
+              $optimize = if ($parent.Contains('Os')) { 'Os' } 
+                        elseif ($parent.Contains('O2')) { 'O2' }
+                        else { 'O3' }
+              $linkType = if ($parent.Contains('static')) { 'static' } else { 'dynamic' }
+              $arch = $parent.Split('-')[-1]
+              $newName = "python-${date}-$arch-$optimize-$linkType.tar.xz"
+              Move-Item $_.FullName "artifacts/$newName"
+          }
+
+      - name: 获取日期供 Release 使用
+        id: get-date
+        run: echo "current-date=$(date -u +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: $(date -u +'%Y%m%d')
+          name: "python-builder Build Time: ($(date -u +'%Y-%m-%d')) Release"
+          body: |
+            ## 🚀 Python的MinGW自动构建发布
+            构建时间：${{ steps.get-date.outputs.current-date }}
+
+            这个版本最低支持的Windows版本为Windows 8，但是你可以试试把它放在Windows 7上运行
+
+            ## 🤔 我要下载哪个？
+            文件名的格式为：`python-<日期>-<架构>-<优化级别>-<链接类型>.tar.xz`
+
+            如果真的不知道怎么选，请选择`python-<日期>-x86_64-O2-dynamic.tar.xz`
+
+            如果你倾向速度，可以选择`python-<日期>-x86_64-O3-dynamic.tar.xz`  
+            如果你倾向大小，可以选择`python-<日期>-x86_64-Os-dynamic.tar.xz`  
+          prerelease: false
+          files: |
+            artifacts/python-*.tar.xz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

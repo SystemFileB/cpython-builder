@@ -1,4 +1,4 @@
-name: Build
+name: 构建 - Os优化 - 动态链接
 on: 
   push:
     branches:
@@ -78,18 +78,6 @@ jobs:
 
           rm -Rf _build && mkdir _build && cd _build
 
-          #../configure \
-          #  --prefix=${MINGW_PREFIX} \
-          #  --host=${MINGW_CHOST} \
-          #  --build=${MINGW_CHOST} \
-          #  --enable-shared \
-          #  --with-system-expat \
-          #  --with-system-libmpdec \
-          #  --without-ensurepip \
-          #  --with-static-libpython \
-          #  --enable-loadable-sqlite-extensions \
-          #  --with-tzpath=${MINGW_PREFIX}/share/zoneinfo \
-          #  --with-lto=yes
           ../configure \
             --prefix=${MINGW_PREFIX} \
             --bindir=${MINGW_PREFIX} \
@@ -98,7 +86,6 @@ jobs:
             --host=${MINGW_CHOST} \
             --build=${MINGW_CHOST} \
             --enable-shared \
-            --enable-static \
             --without-ensurepip \
             --with-system-expat \
             --with-system-libmpdec \
@@ -108,7 +95,7 @@ jobs:
             --with-static-libpython \
             --enable-loadable-sqlite-extensions \
             --with-lto=yes \
-            CFLAGS="-O2 -pipe -D__USE_MINGW_ANSI_STDIO=1 -flto -fno-unroll-loops -fno-ident" \
+            CFLAGS="-Os -pipe -D__USE_MINGW_ANSI_STDIO=1 -flto -fno-unroll-loops -fno-ident" \
             LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
 
           make -j8
