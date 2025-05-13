@@ -10,10 +10,14 @@ on:
       - "构建 - O3优化 - 动态链接"
       - "构建 - O3优化 - 静态链接"
     types: [completed]
+    branches: [main]  # 添加这行确保只在主分支触发
 
 jobs:
   release:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # 修改条件判断，确保所有工作流都成功
+    if: |
+      contains(fromJson('["构建 - Os优化 - 动态链接", "构建 - Os优化 - 静态链接", "构建 - O2优化 - 动态链接", "构建 - O2优化 - 静态链接", "构建 - O3优化 - 动态链接", "构建 - O3优化 - 静态链接"]'), github.event.workflow_run.name) &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: windows-latest
     steps:
       - name: 下载所有构建产物
