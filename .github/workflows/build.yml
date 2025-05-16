@@ -1,4 +1,4 @@
-name: 构建 - Os优化 - 动态链接
+name: 构建
 on: 
   push:
     branches:
@@ -13,6 +13,13 @@ jobs:
       fail-fast: false
       matrix:
         msystem: ['MINGW64','MINGW32','CLANG64','CLANGARM64']
+        build_type:  # 新增构建类型矩阵
+          - { optimization: "O3", link_type: "dynamic", cflag: "-O3", shared_flag: "--enable-shared --with-lto=yes" }
+          - { optimization: "O3", link_type: "static", cflag: "-O3", shared_flag: "--with-static-libpython" }
+          - { optimization: "O2", link_type: "dynamic", cflag: "-O2", shared_flag: "--enable-shared --with-lto=yes" }
+          - { optimization: "O2", link_type: "static", cflag: "-O2", shared_flag: "--disable-shared" }
+          - { optimization: "Os", link_type: "dynamic", cflag: "-Os", shared_flag: "--enable-shared --with-lto=yes" }
+          - { optimization: "Os", link_type: "static", cflag: "-Os", shared_flag: "--with-static-libpython" }
         include:
           - msystem: MINGW64
             prefix: mingw-w64-x86_64
@@ -85,17 +92,15 @@ jobs:
             --docdir=${MINGW_PREFIX}/doc \
             --host=${MINGW_CHOST} \
             --build=${MINGW_CHOST} \
-            --enable-shared \
+            ${ { matrix.build_type.shared_flag } } \
             --without-ensurepip \
             --with-system-expat \
             --with-system-libmpdec \
             --enable-optimizations \
             --disable-test-modules \
             --with-nt-threads \
-            --with-static-libpython \
             --enable-loadable-sqlite-extensions \
-            --with-lto=yes \
-            CFLAGS="-Os -pipe -D__USE_MINGW_ANSI_STDIO=1 -flto -fno-unroll-loops -fno-ident" \
+            CFLAGS="${ { matrix.build_type.cflag } } -pipe -D__USE_MINGW_ANSI_STDIO=1" \
             LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
 
           make -j8
@@ -140,5 +145,4 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: build-${{ matrix.msystem }}
-          path: cpython-mingw/_build/python.tar.xz
+          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}  # 修改产物名称
