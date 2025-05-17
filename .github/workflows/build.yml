@@ -8,6 +8,9 @@ on:
 
 jobs:
   build:
+    concurrency:
+      group: build-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -49,6 +52,7 @@ jobs:
           install: >-
             make
             git
+            dos2unix
             binutils
             autoconf
             autoconf-archive
@@ -177,4 +181,4 @@ jobs:
         with:
           name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}
           path: |
-            cpython-mingw/_build/python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z
+            cpython-mingw/_build/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z
