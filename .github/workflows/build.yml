@@ -55,8 +55,7 @@ jobs:
             autoconf
             autoconf-archive
             automake-wrapper
-            tar
-            gzip
+            ${{ matrix.prefix }}-7zip
             ${{ matrix.prefix }}-toolchain
             ${{ matrix.prefix }}-expat
             ${{ matrix.prefix }}-bzip2
@@ -86,13 +85,14 @@ jobs:
           rm -Rf _build && mkdir _build && cd _build
 
           ../configure \
-            --prefix=${MINGW_PREFIX} \
-            --bindir=${MINGW_PREFIX} \
-            --sbindir=${MINGW_PREFIX} \
-            --docdir=${MINGW_PREFIX}/doc \
+            --prefix=/ \
+            --bindir=/ \
+            --sbindir=/ \
+            --docdir=/doc \
+            --mandir=/doc/man \
             --host=${MINGW_CHOST} \
             --build=${MINGW_CHOST} \
-            ${ { matrix.build_type.shared_flag } } \
+            ${{ matrix.build_type.shared_flag }} \
             --without-ensurepip \
             --with-system-expat \
             --with-system-libmpdec \
@@ -100,7 +100,7 @@ jobs:
             --disable-test-modules \
             --with-nt-threads \
             --enable-loadable-sqlite-extensions \
-            CFLAGS="${ { matrix.build_type.cflag } } -pipe -D__USE_MINGW_ANSI_STDIO=1" \
+            CFLAGS="${{ matrix.build_type.cflag }} -pipe -D__USE_MINGW_ANSI_STDIO=1" \
             LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
 
           make -j8
@@ -112,23 +112,42 @@ jobs:
           set -ex
           cd _build
 
-          pkgdir=python_pkgdir
+          # 获取分支名称 (示例：mingw-v3.12.10)
+          _branch_name=$(git rev-parse --abbrev-ref HEAD)
+          # 构建目录名称
+          _pkg_suffix="${{ matrix.msystem }}-${{ matrix.build_type.optimization }}"
+          [[ "${{ matrix.build_type.link_type }}" == "static" ]] && _pkg_suffix+="-static"
+          pkgdir="python-${_branch_name}-${_pkg_suffix}"
 
           make -j8 install DESTDIR="${pkgdir}"
 
           # Fix shebangs
           _pybasever=$(./python.exe -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}');")
           for fscripts in 2to3 2to3-${_pybasever} idle3 idle${_pybasever} pydoc3 pydoc${_pybasever}; do
-              sed -i "s|$(cygpath -w ${MINGW_PREFIX} | sed 's|\\|\\\\|g')/python${_pybasever}.exe|/usr/bin/env python${_pybasever}.exe|g" "${pkgdir}${MINGW_PREFIX}"/${fscripts}
+              sed -i "s|$(cygpath -w / | sed 's|\\|\\\\|g')/python${_pybasever}.exe|/usr/bin/env python${_pybasever}.exe|g" "${pkgdir}/"/${fscripts}
           done
-          sed -i "s|#!${MINGW_PREFIX}/python${_pybasever}.exe|#!/usr/bin/env python${_pybasever}.exe|" "${pkgdir}${MINGW_PREFIX}"/lib/python${_pybasever}/config-${_pybasever}/python-config.py
+          sed -i "s|#!//python${_pybasever}.exe|#!/usr/bin/env python${_pybasever}.exe|" "${pkgdir}/"/lib/python${_pybasever}/config-${_pybasever}/python-config.py
 
           # Create version-less aliases
-          cp "${pkgdir}${MINGW_PREFIX}"/python3.exe "${pkgdir}${MINGW_PREFIX}"/python.exe
-          cp "${pkgdir}${MINGW_PREFIX}"/python3w.exe "${pkgdir}${MINGW_PREFIX}"/pythonw.exe
-          cp "${pkgdir}${MINGW_PREFIX}"/python3-config "${pkgdir}${MINGW_PREFIX}"/python-config
-          cp "${pkgdir}${MINGW_PREFIX}"/idle3 "${pkgdir}${MINGW_PREFIX}"/idle
-          cp "${pkgdir}${MINGW_PREFIX}"/pydoc3 "${pkgdir}${MINGW_PREFIX}"/pydoc
+          cp "${pkgdir}/"/python3.exe "${pkgdir}/"/python.exe
+          cp "${pkgdir}/"/python3w.exe "${pkgdir}/"/pythonw.exe
+          cp "${pkgdir}/"/python3-config "${pkgdir}/"/python-config
+          cp "${pkgdir}/"/idle3 "${pkgdir}/"/idle
+          cp "${pkgdir}/"/pydoc3 "${pkgdir}/"/pydoc
+
+          # 转换配置文件为 Windows 格式
+          for config in python3-config python3.12-config python-config; do
+              unix2dos -n "${pkgdir}/${config}" "${pkgdir}/${config}.bat"
+          done
+
+          # 创建 VBS 启动脚本
+          for script in idle3 pydoc3 2to3; do
+              cat << EOF > "${pkgdir}/${script}.vbs"
+          Set WshShell = CreateObject("WScript.Shell")
+          WshShell.Run "python3w -m ${script} " & WScript.Arguments(0), 0
+          EOF
+              unix2dos "${pkgdir}/${script}.vbs"
+          done
 
           # copy to /
           cp -rf "${pkgdir}"/* /
@@ -139,10 +158,12 @@ jobs:
         run: |
           cd cpython-mingw
           cd _build
-          tar -zcf python.tar.xz python_pkgdir/
+          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z ${pkgdir}/
 
       - name: 上传
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}  # 修改产物名称
+          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}
+          path: |
+            cpython-mingw/_build/python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z
