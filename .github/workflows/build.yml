@@ -143,14 +143,18 @@ jobs:
           set -ex
           cd _build
 
+          # 创建专用打包目录
+          _build_root="${PWD}"
+          mkdir -p pkgdir
+
           # 获取分支名称 (示例：mingw-v3.12.10)
           _branch_name=$(git rev-parse --abbrev-ref HEAD)
           # 构建目录名称
           _pkg_suffix="${{ matrix.msystem }}-${{ matrix.build_type.optimization }}"
           [[ "${{ matrix.build_type.link_type }}" == "static" ]] && _pkg_suffix+="-static"
-          pkgdir="python-${_branch_name}-${_pkg_suffix}"
+          pkgdir="pkgdir/python-${_branch_name}-${_pkg_suffix}"  # ← 修改路径
 
-          make -j8 install DESTDIR="${pkgdir}"
+          make -j8 install DESTDIR="${_build_root}/${pkgdir}"  # ← 修改安装路径
 
           # Fix shebangs
           _pybasever=$(./python.exe -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}');")
@@ -187,9 +191,8 @@ jobs:
         if: always()
         shell: msys2 {0}
         run: |
-          cd cpython-mingw
-          cd _build
-          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z ${pkgdir}/
+          cd cpython-mingw/_build
+          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z "pkgdir/*"  # ← 修改压缩路径
 
       - name: 上传
         uses: actions/upload-artifact@v4
