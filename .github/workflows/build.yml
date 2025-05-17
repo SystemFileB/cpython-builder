@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        msystem: ['MINGW64','MINGW32','CLANG64','CLANGARM64']
+        msystem: ['MINGW64','MINGW32','CLANGARM64']
         build_type:  # 新增构建类型矩阵
           - { optimization: "O3", link_type: "dynamic", cflag: "-O3", shared_flag: "--enable-shared --with-lto=yes" }
           - { optimization: "O3", link_type: "static", cflag: "-O3", shared_flag: "--with-static-libpython" }
@@ -26,9 +26,6 @@ jobs:
             runner: windows-2022
           - msystem: MINGW32
             prefix: mingw-w64-i686
-            runner: windows-2022
-          - msystem: CLANG64
-            prefix: mingw-w64-clang-x86_64
             runner: windows-2022
           - msystem: CLANGARM64
             prefix: mingw-w64-clang-aarch64
@@ -51,6 +48,7 @@ jobs:
           update: true
           install: >-
             make
+            git
             binutils
             autoconf
             autoconf-archive
@@ -70,38 +68,51 @@ jobs:
             ${{ matrix.prefix }}-xz
             ${{ matrix.prefix }}-tzdata
 
+      - name: 缓存MSYS2包
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:/msys64/var/cache/pacman/pkg/
+          key: ${{ runner.os }}-msys2-pkg-${{ hashFiles('**/install-pacman-packages.sh') }}
+
+      - name: 缓存编译结果
+        uses: actions/cache@v4
+        with:
+          path: |
+            cpython-mingw/_build/**
+          key: ${{ runner.os }}-pybuild-${{ hashFiles('**/*.c', '**/*.h', '**/configure', '**/Makefile*') }}
+
       - name: 编译
         shell: msys2 {0}
         run: |
           cd cpython-mingw
           set -ex
+          
+          if [[ ! -d _build ]]; then
+            autoreconf -vfi
+            mkdir -p _build && cd _build
 
-          if [[ "${{ matrix.msystem }}" == CLANG* ]]; then
-            export CC=clang
-            export CXX=clang++
+            ../configure \
+              --prefix=/ \
+              --bindir=/ \
+              --sbindir=/ \
+              --docdir=/doc \
+              --mandir=/doc/man \
+              --host=${MINGW_CHOST} \
+              --build=${MINGW_CHOST} \
+              ${{ matrix.build_type.shared_flag }} \
+              --without-ensurepip \
+              --with-system-expat \
+              --with-system-libmpdec \
+              --enable-optimizations \
+              --disable-test-modules \
+              --with-nt-threads \
+              --enable-loadable-sqlite-extensions \
+              CFLAGS="${{ matrix.build_type.cflag }} -pipe -D__USE_MINGW_ANSI_STDIO=1" \
+              LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
+          else
+            cd _build
           fi
-          autoreconf -vfi
-
-          rm -Rf _build && mkdir _build && cd _build
-
-          ../configure \
-            --prefix=/ \
-            --bindir=/ \
-            --sbindir=/ \
-            --docdir=/doc \
-            --mandir=/doc/man \
-            --host=${MINGW_CHOST} \
-            --build=${MINGW_CHOST} \
-            ${{ matrix.build_type.shared_flag }} \
-            --without-ensurepip \
-            --with-system-expat \
-            --with-system-libmpdec \
-            --enable-optimizations \
-            --disable-test-modules \
-            --with-nt-threads \
-            --enable-loadable-sqlite-extensions \
-            CFLAGS="${{ matrix.build_type.cflag }} -pipe -D__USE_MINGW_ANSI_STDIO=1" \
-            LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
 
           make -j8
 
