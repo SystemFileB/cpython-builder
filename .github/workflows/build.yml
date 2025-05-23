@@ -90,12 +90,13 @@ jobs:
       - name: 应用补丁
         shell: msys2 {0}
         run: |
-          cd cpython-mingw
-          # 应用Windows 7兼容性补丁
-          git apply ../thirdparty/restore-win7-handling-1.patch || exit 1
-          git apply ../thirdparty/fix-os-fstat.patch || exit 1
-          # 如果未来需要3.13补丁：
-          # git apply ../thirdparty/restore-win7-handling-2.patch || exit 1
+          echo 这里什么也没干
+          # cd cpython-mingw
+          # # 应用Windows 7兼容性补丁
+          # git apply ../thirdparty/restore-win7-handling-1.patch || exit 1
+          # git apply ../thirdparty/fix-os-fstat.patch || exit 1
+          # # 如果未来需要3.13补丁：
+          # # git apply ../thirdparty/restore-win7-handling-2.patch || exit 1
 
       - name: 编译
         shell: msys2 {0}
