@@ -42,16 +42,6 @@ jobs:
         run: |
           git clone https://github.com/msys2-contrib/cpython-mingw.git --depth 1
 
-      - name: 应用补丁
-        shell: msys2 {0}
-        run: |
-          cd cpython-mingw
-          # 应用Windows 7兼容性补丁
-          git apply ../thirdparty/restore-win7-handling-1.patch || exit 1
-          git apply ../thirdparty/fix-os-fstat.patch || exit 1
-          # 如果未来需要3.13补丁：
-          # git apply ../thirdparty/restore-win7-handling-2.patch || exit 1
-
       - name: 恢复MSYS2包缓存
         uses: actions/cache@v4
         id: restore-msys2
@@ -96,6 +86,16 @@ jobs:
           path: |
             C:/msys64/var/cache/pacman/pkg/
           key: ${{ runner.os }}-msys2-pkg-${{ hashFiles('**/install-pacman-packages.sh') }}
+
+      - name: 应用补丁
+        shell: msys2 {0}
+        run: |
+          cd cpython-mingw
+          # 应用Windows 7兼容性补丁
+          git apply ../thirdparty/restore-win7-handling-1.patch || exit 1
+          git apply ../thirdparty/fix-os-fstat.patch || exit 1
+          # 如果未来需要3.13补丁：
+          # git apply ../thirdparty/restore-win7-handling-2.patch || exit 1
 
       - name: 编译
         shell: msys2 {0}
