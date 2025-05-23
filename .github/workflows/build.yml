@@ -15,11 +15,8 @@ jobs:
         msystem: ['MINGW64','MINGW32','CLANGARM64']
         build_type:  # 新增构建类型矩阵
           - { optimization: "O3", link_type: "dynamic", cflag: "-O3", shared_flag: "--enable-shared --with-lto=yes" }
-          - { optimization: "O3", link_type: "static", cflag: "-O3", shared_flag: "--with-static-libpython" }
           - { optimization: "O2", link_type: "dynamic", cflag: "-O2", shared_flag: "--enable-shared --with-lto=yes" }
-          - { optimization: "O2", link_type: "static", cflag: "-O2", shared_flag: "--disable-shared" }
           - { optimization: "Os", link_type: "dynamic", cflag: "-Os", shared_flag: "--enable-shared --with-lto=yes" }
-          - { optimization: "Os", link_type: "static", cflag: "-Os", shared_flag: "--with-static-libpython" }
         include:
           - msystem: MINGW64
             prefix: mingw-w64-x86_64
@@ -35,10 +32,25 @@ jobs:
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
+      
+      - name: 获取本仓库文件
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 克隆python存储库
         run: |
           git clone https://github.com/msys2-contrib/cpython-mingw.git --depth 1
+
+      - name: 应用补丁
+        shell: msys2 {0}
+        run: |
+          cd cpython-mingw
+          # 应用Windows 7兼容性补丁
+          git apply ../thirdparty/restore-win7-handling-1.patch || exit 1
+          git apply ../thirdparty/fix-os-fstat.patch || exit 1
+          # 如果未来需要3.13补丁：
+          # git apply ../thirdparty/restore-win7-handling-2.patch || exit 1
 
       - name: 恢复MSYS2包缓存
         uses: actions/cache@v4
@@ -85,63 +97,42 @@ jobs:
             C:/msys64/var/cache/pacman/pkg/
           key: ${{ runner.os }}-msys2-pkg-${{ hashFiles('**/install-pacman-packages.sh') }}
 
-
-      - name: 恢复编译缓存
-        uses: actions/cache@v4
-        id: restore-build
-        with:
-          path: |
-            cpython-mingw/_build/**
-          key: ${{ runner.os }}-pybuild-${{ hashFiles('**/*.c', '**/*.h', '**/configure', '**/Makefile*') }}
-
       - name: 编译
         shell: msys2 {0}
         run: |
-          cd cpython-mingw
+          mkdir build
           set -ex
-          
-          if [[ ! -d _build ]]; then
-            autoreconf -vfi
-            mkdir -p _build && cd _build
 
-            ../configure \
-              --prefix=/ \
-              --bindir=/ \
-              --sbindir=/ \
-              --docdir=/doc \
-              --mandir=/doc/man \
-              --host=${MINGW_CHOST} \
-              --build=${MINGW_CHOST} \
-              ${{ matrix.build_type.shared_flag }} \
-              --without-ensurepip \
-              --with-system-expat \
-              --with-system-libmpdec \
-              --enable-optimizations \
-              --disable-test-modules \
-              --with-nt-threads \
-              --enable-loadable-sqlite-extensions \
-              CFLAGS="${{ matrix.build_type.cflag }} -pipe -D__USE_MINGW_ANSI_STDIO=1" \
-              LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
-          else
-            cd _build
-          fi
+          cd cpython-mingw
+          autoreconf -vfi
+          cd ../build
+
+          ../cpython-mingw/configure \
+            --prefix=/ \
+            --bindir=/ \
+            --sbindir=/ \
+            --docdir=/doc \
+            --mandir=/doc/man \
+            --host=${MINGW_CHOST} \
+            --build=${MINGW_CHOST} \
+            ${{ matrix.build_type.shared_flag }} \
+            --without-ensurepip \
+            --with-system-expat \
+            --with-system-libmpdec \
+            --enable-optimizations \
+            --disable-test-modules \
+            --with-nt-threads \
+            --enable-loadable-sqlite-extensions \
+            CFLAGS="${{ matrix.build_type.cflag }} -pipe -D__USE_MINGW_ANSI_STDIO=1" \
+            LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
 
           make -j8
 
-      - name: 保存编译缓存
-        if: steps.restore-build.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: |
-            cpython-mingw/_build/**
-          key: ${{ runner.os }}-pybuild-${{ hashFiles('**/*.c', '**/*.h', '**/configure', '**/Makefile*') }}
-
-      - name: 安装
+      - name: 安装+压缩
         shell: msys2 {0}
         run: |
-          cd cpython-mingw
           set -ex
-          cd _build
+          cd build
 
           # 创建专用打包目录
           _build_root="${PWD}"
@@ -170,29 +161,25 @@ jobs:
           cp "${pkgdir}/"/idle3 "${pkgdir}/"/idle
           cp "${pkgdir}/"/pydoc3 "${pkgdir}/"/pydoc
 
-          # 转换配置文件为 Windows 格式
-          for config in python3-config python3.12-config python-config; do
-              unix2dos -n "${pkgdir}/${config}" "${pkgdir}/${config}.bat"
-          done
-
           # 创建 VBS 启动脚本
           for script in idle3 pydoc3 2to3; do
               cat << EOF > "${pkgdir}/${script}.vbs"
           Set WshShell = CreateObject("WScript.Shell")
-          WshShell.Run "python3w -m ${script} " & WScript.Arguments(0), 0
+          args = ""
+          For Each arg In WScript.Arguments
+              args = args & " " & Quote(arg)
+          Next
+          WshShell.Run "python3w -m ${script} " & args, 0
+          
+          Function Quote(s)
+              Quote = Chr(34) & s & Chr(34)
+          End Function
           EOF
               unix2dos "${pkgdir}/${script}.vbs"
           done
 
-          # copy to /
-          cp -rf "${pkgdir}"/* /
-
-      - name: 压缩构建产物
-        if: always()
-        shell: msys2 {0}
-        run: |
-          cd cpython-mingw/_build
-          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z "pkgdir/*"  # ← 修改压缩路径
+          # 压缩
+          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z "${pkgdir}"
 
       - name: 上传
         uses: actions/upload-artifact@v4
@@ -200,4 +187,39 @@ jobs:
         with:
           name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}
           path: |
-            cpython-mingw/_build/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z
+            build/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z
+      
+      - name: 加入依赖
+        if: always()
+        shell: msys2 {0}
+        run: |
+          _pkgdir_pattern="python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}"
+          cd build/pkgdir/${_pkgdir_pattern} || (echo "Directory not found: build/pkgdir/${_pkgdir_pattern}" && exit 1)
+          
+          # 一般的第三方库
+          cp -f ${MINGW_PREFIX}/bin/libsqlite3*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/tcl*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/tk*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libncursesw*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/liblzma*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libmpdec*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libexpat*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libintl*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libssl*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libcrypto*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libbz2*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libffi*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/zlib*.dll ./
+
+          # 已被破解的系统库
+          if [[ "${{ matrix.msystem }}" == "MINGW32" ]]; then
+              cp -vf ../../../thirdparty/x86/api-ms-win-core-path-l1-1-0.dll ./ || exit 1
+          elif [[ "${{ matrix.msystem }}" == "MINGW64" ]]; then
+              cp -vf ../../../thirdparty/x64/api-ms-win-core-path-l1-1-0.dll ./ || exit 1
+          fi
+
+
+          # MinGW的运行时库
+          cp -f ${MINGW_PREFIX}/bin/libgcc_s_seh*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libwinpthread*.dll ./
+          

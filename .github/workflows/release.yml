@@ -1,0 +1,73 @@
+name: 发布
+
+on:
+  workflow_run:
+    workflows: ["构建"]
+    types:
+      - completed
+
+jobs:
+  release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: windows-latest
+    steps:
+      - name: 获取构建时间
+        id: date
+        run: |
+          $date=(Get-Date).ToString("yyyyMMdd")
+          echo "tag=$date" >> $env:GITHUB_OUTPUT
+          echo "release_date=$(Get-Date -Format 'yyyy.M.d')" >> $env:GITHUB_OUTPUT
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 提取Python版本
+        id: version
+        run: |
+          $file=(Get-ChildItem artifacts/*.7z | Select-Object -First 1).Name
+          $version=$file -replace '.*(v\d+\.\d+\.\d+).*','$1'
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+    
+      - name: 生成Markdown表格
+        id: generate_table
+        run: |
+          $content=@()
+          Get-ChildItem artifacts/*.7z | ForEach-Object {
+              $filename = $_.Name
+              $parts = $filename -split '-'
+              $arch = $parts[3]
+              $optimization = $parts[4]
+              $link_type = ($parts[5] -replace '.7z','') -replace 'static','静态' -replace 'dynamic','动态'
+              $content += "| $arch | $optimization | $link_type | [下载]($filename) |"
+          }
+          echo "markdown_table<<EOF" >> $env:GITHUB_OUTPUT
+          echo ($content -join "`n") >> $env:GITHUB_OUTPUT
+          echo "EOF" >> $env:GITHUB_OUTPUT
+
+      - name: 创建Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.date.outputs.tag }}
+          name: "Python-${{ steps.version.outputs.version }}-${{ steps.date.outputs.release_date }}-MinGW"
+          body: |
+            ### 构建详情
+            | 架构 | 优化级别 | 链接类型 | 下载 |
+            |------|---------|---------|-----|
+            ${{ steps.generate_table.outputs.markdown_table }}
+          draft: false
+          prerelease: false
+          skip_if_tag_exists: true
+          files: |
+            artifacts/*.7z
+
+
+      - name: 清理旧Release
+        if: success()
+        uses: dev-drprasad/delete-old-releases@v0.2.3
+        with:
+          keep_latest: 50
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
