@@ -222,4 +222,17 @@ jobs:
           # MinGW的运行时库
           cp -f ${MINGW_PREFIX}/bin/libgcc_s_seh*.dll ./
           cp -f ${MINGW_PREFIX}/bin/libwinpthread*.dll ./
+
+          # 打包
+          cd ..
+          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}-deps.7z "${_pkgdir_pattern}"
+
+      - name: 上传带依赖的Python
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}-deps
+          path: |
+            build/pkgdir/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}-deps.7z
+
           
