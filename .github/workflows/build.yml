@@ -36,7 +36,7 @@ jobs:
       - name: 获取本仓库文件
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: 克隆python存储库
         run: |
@@ -195,8 +195,16 @@ jobs:
         shell: msys2 {0}
         run: |
           _pkgdir_pattern="python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}"
-          cd build/pkgdir/${_pkgdir_pattern} || (echo "Directory not found: build/pkgdir/${_pkgdir_pattern}" && exit 1)
+          cd build/pkgdir || (echo "build/pkgdir 目录不存在" && exit 1)
+          _actual_dir=$(find . -maxdepth 1 -type d -name "${_pkgdir_pattern}" | head -1)
           
+          if [ -z "${_actual_dir}" ]; then
+            echo "无法找到匹配的目录: ${_pkgdir_pattern}"
+            exit 1
+          fi
+          
+          cd "${_actual_dir}" || exit 1
+
           # 一般的第三方库
           cp -f ${MINGW_PREFIX}/bin/libsqlite3*.dll ./
           cp -f ${MINGW_PREFIX}/bin/tcl*.dll ./
