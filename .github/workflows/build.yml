@@ -14,9 +14,9 @@ jobs:
       matrix:
         msystem: ['MINGW64','MINGW32','CLANGARM64']
         build_type:  # 新增构建类型矩阵
-          - { optimization: "O3", link_type: "dynamic", cflag: "-O3", shared_flag: "--enable-shared --with-lto=yes" }
-          - { optimization: "O2", link_type: "dynamic", cflag: "-O2", shared_flag: "--enable-shared --with-lto=yes" }
-          - { optimization: "Os", link_type: "dynamic", cflag: "-Os", shared_flag: "--enable-shared --with-lto=yes" }
+          - { optimization: "O3",  cflag: "-O3" }
+          - { optimization: "O2",  cflag: "-O2" }
+          - { optimization: "Os",  cflag: "-Os" }
         include:
           - msystem: MINGW64
             prefix: mingw-w64-x86_64
@@ -116,7 +116,8 @@ jobs:
             --mandir=/doc/man \
             --host=${MINGW_CHOST} \
             --build=${MINGW_CHOST} \
-            ${{ matrix.build_type.shared_flag }} \
+            --enable-shared \
+            --with-lto=yes \
             --without-ensurepip \
             --with-system-expat \
             --with-system-libmpdec \
@@ -140,10 +141,12 @@ jobs:
           mkdir -p pkgdir
 
           # 获取分支名称 (示例：mingw-v3.12.10)
+          cd ../cpython-mingw
           _branch_name=$(git rev-parse --abbrev-ref HEAD)
+          cd ../build
+
           # 构建目录名称
           _pkg_suffix="${{ matrix.msystem }}-${{ matrix.build_type.optimization }}"
-          [[ "${{ matrix.build_type.link_type }}" == "static" ]] && _pkg_suffix+="-static"
           pkgdir="pkgdir/python-${_branch_name}-${_pkg_suffix}"  # ← 修改路径
 
           make -j8 install DESTDIR="${_build_root}/${pkgdir}"  # ← 修改安装路径
@@ -180,21 +183,21 @@ jobs:
           done
 
           # 压缩
-          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z "${pkgdir}"
+          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}.7z "${pkgdir}"
 
       - name: 上传
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}
+          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}
           path: |
-            build/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}.7z
+            build/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}.7z
       
       - name: 加入依赖
         if: always()
         shell: msys2 {0}
         run: |
-          _pkgdir_pattern="python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}"
+          _pkgdir_pattern="python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}"
           cd build/pkgdir || (echo "build/pkgdir 目录不存在" && exit 1)
           _actual_dir=$(find . -maxdepth 1 -type d -name "${_pkgdir_pattern}" | head -1)
           
@@ -234,14 +237,14 @@ jobs:
 
           # 打包
           cd ..
-          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}-deps.7z "${_pkgdir_pattern}"
+          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-deps.7z "${_pkgdir_pattern}"
 
       - name: 上传带依赖的Python
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}-deps
+          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-deps
           path: |
-            build/pkgdir/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-${{ matrix.build_type.link_type }}-deps.7z
+            build/pkgdir/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-deps.7z
 
           
