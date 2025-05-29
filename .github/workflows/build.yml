@@ -206,7 +206,7 @@ jobs:
             exit 1
           fi
           
-          cd "${_actual_dir}" || exit 1
+          cd "${_actual_dir}"
 
           # 一般的第三方库
           cp -f ${MINGW_PREFIX}/bin/libsqlite3*.dll ./
@@ -225,14 +225,18 @@ jobs:
 
           # 已被破解的系统库
           if [[ "${{ matrix.msystem }}" == "MINGW32" ]]; then
-              cp -vf ../../../thirdparty/x86/api-ms-win-core-path-l1-1-0.dll ./ || exit 1
+              cp -vf ../../../thirdparty/x86/api-ms-win-core-path-l1-1-0.dll ./
           elif [[ "${{ matrix.msystem }}" == "MINGW64" ]]; then
-              cp -vf ../../../thirdparty/x64/api-ms-win-core-path-l1-1-0.dll ./ || exit 1
+              cp -vf ../../../thirdparty/x64/api-ms-win-core-path-l1-1-0.dll ./
           fi
 
 
           # MinGW的运行时库
-          cp -f ${MINGW_PREFIX}/bin/libgcc_s_seh*.dll ./
+          if [[ "${{ matrix.msystem }}" == "MINGW64" ]]; then
+            cp -f ${MINGW_PREFIX}/bin/libgcc_s_seh*.dll ./
+          elif [[ "${{ matrix.msystem }}" == "MINGW32" ]]; then
+            cp -f ${MINGW_PREFIX}/bin/libgcc_s_dw2*.dll ./
+          fi
           cp -f ${MINGW_PREFIX}/bin/libwinpthread*.dll ./
 
           # 打包
