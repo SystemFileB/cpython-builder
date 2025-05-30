@@ -1,0 +1,244 @@
+name: 构建 - 自托管运行器
+on: [workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: [self-hosted, windows, X64]
+    strategy:
+      fail-fast: false
+      matrix:
+        msystem: ['MINGW64','MINGW32','CLANGARM64']
+        build_type:  # 新增构建类型矩阵
+          - { optimization: "O3",  cflag: "-O3" }
+          - { optimization: "O2",  cflag: "-O2" }
+          - { optimization: "Os",  cflag: "-Os" }
+        include:
+          - msystem: MINGW64
+            prefix: mingw-w64-x86_64
+          - msystem: MINGW32
+            prefix: mingw-w64-i686
+    steps:
+      - name: 设置git
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      
+      - name: 获取本仓库文件
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 克隆python存储库
+        run: |
+          git clone https://github.com/msys2-contrib/cpython-mingw.git --depth 1
+
+      - name: 恢复MSYS2包缓存
+        uses: actions/cache@v4
+        id: restore-msys2
+        with:
+          path: |
+            C:/msys64/var/cache/pacman/pkg/
+          key: ${{ runner.os }}-msys2-pkg-${{ hashFiles('**/install-pacman-packages.sh') }}
+
+      - name: 安装MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          release: ${{ matrix.msystem == 'CLANGARM64' }}
+          update: true
+          install: >-
+            make
+            git
+            dos2unix
+            binutils
+            autoconf
+            autoconf-archive
+            automake-wrapper
+            ${{ matrix.prefix }}-7zip
+            ${{ matrix.prefix }}-toolchain
+            ${{ matrix.prefix }}-expat
+            ${{ matrix.prefix }}-bzip2
+            ${{ matrix.prefix }}-libffi
+            ${{ matrix.prefix }}-mpdecimal
+            ${{ matrix.prefix }}-ncurses
+            ${{ matrix.prefix }}-openssl
+            ${{ matrix.prefix }}-sqlite3
+            ${{ matrix.prefix }}-tcl
+            ${{ matrix.prefix }}-tk
+            ${{ matrix.prefix }}-zlib
+            ${{ matrix.prefix }}-xz
+            ${{ matrix.prefix }}-tzdata
+
+      - name: 保存MSYS2包缓存
+        if: steps.restore-msys2.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:/msys64/var/cache/pacman/pkg/
+          key: ${{ runner.os }}-msys2-pkg-${{ hashFiles('**/install-pacman-packages.sh') }}
+
+      - name: 应用补丁
+        shell: msys2 {0}
+        run: |
+          echo 这里什么也没干
+          # cd cpython-mingw
+          # # 应用Windows 7兼容性补丁
+          # git apply ../thirdparty/restore-win7-handling-1.patch || exit 1
+          # git apply ../thirdparty/fix-os-fstat.patch || exit 1
+          # # 如果未来需要3.13补丁：
+          # # git apply ../thirdparty/restore-win7-handling-2.patch || exit 1
+
+      - name: 编译
+        shell: msys2 {0}
+        run: |
+          mkdir build
+          set -ex
+
+          cd cpython-mingw
+          autoreconf -vfi
+          cd ../build
+
+          ../cpython-mingw/configure \
+            --prefix=/ \
+            --bindir=/ \
+            --sbindir=/ \
+            --docdir=/doc \
+            --mandir=/doc/man \
+            --host=${MINGW_CHOST} \
+            --build=${MINGW_CHOST} \
+            --enable-shared \
+            --with-lto=yes \
+            --without-ensurepip \
+            --with-system-expat \
+            --with-system-libmpdec \
+            --enable-optimizations \
+            --disable-test-modules \
+            --with-nt-threads \
+            --enable-loadable-sqlite-extensions \
+            CFLAGS="${{ matrix.build_type.cflag }} -pipe -D__USE_MINGW_ANSI_STDIO=1" \
+            LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
+
+          make -j8
+
+      - name: 安装+压缩
+        shell: msys2 {0}
+        run: |
+          set -ex
+          cd build
+
+          # 创建专用打包目录
+          _build_root="${PWD}"
+          mkdir -p pkgdir
+
+          # 获取分支名称 (示例：mingw-v3.12.10)
+          cd ../cpython-mingw
+          _branch_name=$(git rev-parse --abbrev-ref HEAD)
+          cd ../build
+
+          # 构建目录名称
+          _pkg_suffix="${{ matrix.msystem }}-${{ matrix.build_type.optimization }}"
+          pkgdir="pkgdir/python-${_branch_name}-${_pkg_suffix}"  # ← 修改路径
+
+          make -j8 install DESTDIR="${_build_root}/${pkgdir}"  # ← 修改安装路径
+
+          # Fix shebangs
+          _pybasever=$(./python.exe -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}');")
+          for fscripts in 2to3 2to3-${_pybasever} idle3 idle${_pybasever} pydoc3 pydoc${_pybasever}; do
+              sed -i "s|$(cygpath -w / | sed 's|\\|\\\\|g')/python${_pybasever}.exe|/usr/bin/env python${_pybasever}.exe|g" "${pkgdir}/"/${fscripts}
+          done
+          sed -i "s|#!//python${_pybasever}.exe|#!/usr/bin/env python${_pybasever}.exe|" "${pkgdir}/"/lib/python${_pybasever}/config-${_pybasever}/python-config.py
+
+          # Create version-less aliases
+          cp "${pkgdir}/"/python3.exe "${pkgdir}/"/python.exe
+          cp "${pkgdir}/"/python3w.exe "${pkgdir}/"/pythonw.exe
+          cp "${pkgdir}/"/python3-config "${pkgdir}/"/python-config
+          cp "${pkgdir}/"/idle3 "${pkgdir}/"/idle
+          cp "${pkgdir}/"/pydoc3 "${pkgdir}/"/pydoc
+
+          # 创建 VBS 启动脚本
+          for script in idle3 pydoc3 2to3; do
+              cat << EOF > "${pkgdir}/${script}.vbs"
+          Set WshShell = CreateObject("WScript.Shell")
+          args = ""
+          For Each arg In WScript.Arguments
+              args = args & " " & Quote(arg)
+          Next
+          WshShell.Run "python3w -m ${script} " & args, 0
+          
+          Function Quote(s)
+              Quote = Chr(34) & s & Chr(34)
+          End Function
+          EOF
+              unix2dos "${pkgdir}/${script}.vbs"
+          done
+
+          # 压缩
+          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}.7z "${pkgdir}"
+
+      - name: 上传
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}
+          path: |
+            build/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}.7z
+      
+      - name: 加入依赖
+        if: always()
+        shell: msys2 {0}
+        run: |
+          _pkgdir_pattern="python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}"
+          cd build/pkgdir || (echo "build/pkgdir 目录不存在" && exit 1)
+          _actual_dir=$(find . -maxdepth 1 -type d -name "${_pkgdir_pattern}" | head -1)
+          
+          if [ -z "${_actual_dir}" ]; then
+            echo "无法找到匹配的目录: ${_pkgdir_pattern}"
+            exit 1
+          fi
+          
+          cd "${_actual_dir}"
+
+          # 一般的第三方库
+          cp -f ${MINGW_PREFIX}/bin/libsqlite3*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/tcl*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/tk*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libncursesw*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/liblzma*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libmpdec*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libexpat*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libintl*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libssl*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libcrypto*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libbz2*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/libffi*.dll ./
+          cp -f ${MINGW_PREFIX}/bin/zlib*.dll ./
+
+          # 已被破解的系统库
+          if [[ "${{ matrix.msystem }}" == "MINGW32" ]]; then
+              cp -vf ../../../thirdparty/x86/api-ms-win-core-path-l1-1-0.dll ./
+          elif [[ "${{ matrix.msystem }}" == "MINGW64" ]]; then
+              cp -vf ../../../thirdparty/x64/api-ms-win-core-path-l1-1-0.dll ./
+          fi
+
+
+          # MinGW的运行时库
+          if [[ "${{ matrix.msystem }}" == "MINGW64" ]]; then
+            cp -f ${MINGW_PREFIX}/bin/libgcc_s_seh*.dll ./
+          elif [[ "${{ matrix.msystem }}" == "MINGW32" ]]; then
+            cp -f ${MINGW_PREFIX}/bin/libgcc_s_dw2*.dll ./
+          fi
+          cp -f ${MINGW_PREFIX}/bin/libwinpthread*.dll ./
+
+          # 打包
+          cd ..
+          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-deps.7z "${_pkgdir_pattern}"
+
+      - name: 上传带依赖的Python
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-deps
+          path: |
+            build/pkgdir/python-*-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}-deps.7z
+
+          

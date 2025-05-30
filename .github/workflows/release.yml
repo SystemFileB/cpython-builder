@@ -7,22 +7,28 @@ on:
       - completed
   workflow_dispatch:
     inputs:
-      tag:
-        description: 手动指定标签
+      tag:  # 保留但改为可选参数
+        description: "手动指定日期标签（格式：yyyyMMdd）"
         required: false
+        default: ${{ github. }}  # 添加默认值
 
 jobs:
   release:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}  # 修改判断逻辑
     runs-on: windows-latest
-    permissions:  # 新增权限声明
-      contents: write  # 允许创建/删除 releases
-      actions: read    # 允许查看 workflow 状态
+    permissions:
+      contents: write
+      actions: read
     steps:
       - name: 获取构建时间
         id: date
         run: |
-          $date=(Get-Date).ToString("yyyyMMdd")
+          # 添加手动触发时的tag处理逻辑
+          $date = if (${{ github.event_name == 'workflow_dispatch' }}) { 
+            ${{ github.event.inputs.tag || (Get-Date).ToString('yyyyMMdd') }} 
+          } else { 
+            (Get-Date).ToString('yyyyMMdd') 
+          }
           echo "tag=$date" >> $env:GITHUB_OUTPUT
           echo "release_date=$(Get-Date -Format 'yyyy.M.d')" >> $env:GITHUB_OUTPUT
 
