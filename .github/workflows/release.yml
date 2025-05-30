@@ -5,11 +5,19 @@ on:
     workflows: ["构建"]
     types:
       - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 手动指定标签
+        required: false
 
 jobs:
   release:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: windows-latest
+    permissions:  # 新增权限声明
+      contents: write  # 允许创建/删除 releases
+      actions: read    # 允许查看 workflow 状态
     steps:
       - name: 获取构建时间
         id: date
@@ -65,9 +73,32 @@ jobs:
 
       - name: 清理旧Release
         if: success()
-        uses: dev-drprasad/delete-old-releases@v0.2.3
+        uses: actions/github-script@v7
         with:
-          keep_latest: 50
-          delete_tags: true
+          script: |
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            const sortedReleases = releases
+              .filter(release => !release.draft && !release.prerelease)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            
+            for (const release of sortedReleases.slice(50)) {
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id
+              });
+              
+              // 同时删除对应标签
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${release.tag_name}`
+              });
+            }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
