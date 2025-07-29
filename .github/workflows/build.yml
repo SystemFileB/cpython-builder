@@ -124,7 +124,7 @@ jobs:
             --disable-test-modules \
             --with-nt-threads \
             --enable-loadable-sqlite-extensions \
-            CFLAGS="${{ matrix.build_type.cflag }} -pipe -D__USE_MINGW_ANSI_STDIO=1" \
+            CFLAGS="${{ matrix.build_type.cflag }} -pipe -D__USE_MINGW_ANSI_STDIO=1 -I${MINGW_PREFIX}/include/ncurses" \
             LDFLAGS="-Wl,--strip-all,--gc-sections,-s"
 
           make -j8
