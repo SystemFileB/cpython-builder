@@ -90,19 +90,18 @@ jobs:
       - name: 应用补丁
         shell: msys2 {0}
         run: |
-          echo 这里什么也没干
-          # cd cpython-mingw
+          cd cpython-mingw
           # # 应用Windows 7兼容性补丁
-          # git apply ../thirdparty/restore-win7-handling-1.patch || exit 1
-          # git apply ../thirdparty/fix-os-fstat.patch || exit 1
-          # # 如果未来需要3.13补丁：
-          # # git apply ../thirdparty/restore-win7-handling-2.patch || exit 1
+          git apply ../thirdparty/restore-win7-handling-1.patch || echo 补丁应用失败，这个版本将不会支持Win7
 
       - name: 编译
         shell: msys2 {0}
         run: |
           mkdir build
           set -ex
+
+          export PKG_CONFIG_LIBDIR=/dev/null
+          unset PKG_CONFIG_PATH
 
           cd cpython-mingw
           autoreconf -vfi
@@ -165,25 +164,9 @@ jobs:
           cp "${pkgdir}/"/idle3 "${pkgdir}/"/idle
           cp "${pkgdir}/"/pydoc3 "${pkgdir}/"/pydoc
 
-          # 创建 VBS 启动脚本
-          for script in idle3 pydoc3 2to3; do
-              cat << EOF > "${pkgdir}/${script}.vbs"
-          Set WshShell = CreateObject("WScript.Shell")
-          args = ""
-          For Each arg In WScript.Arguments
-              args = args & " " & Quote(arg)
-          Next
-          WshShell.Run "python3w -m ${script} " & args, 0
-          
-          Function Quote(s)
-              Quote = Chr(34) & s & Chr(34)
-          End Function
-          EOF
-              unix2dos "${pkgdir}/${script}.vbs"
-          done
 
           # 压缩
-          7z a -t7z -mx=9 python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}.7z "${pkgdir}"
+          7z a -t7z -mx=9 "python-${_branch_name}-${{ matrix.msystem }}-${{ matrix.build_type.optimization }}.7z" "${pkgdir}"
 
       - name: 上传
         uses: actions/upload-artifact@v4
